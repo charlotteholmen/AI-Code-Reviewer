@@ -1,0 +1,257 @@
+version: '3.8'
+
+services:
+  # 🗄️ MongoDB Service
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-repo-fixer}
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongodb/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # 🐰 RabbitMQ Service
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # 🔐 Auth Service
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./services/auth-service/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: mongodb
+      DB_PORT: 27017
+      MONGO_USER: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
+      MONGO_DB: auth_db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "node", "health-check.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 💻 Editor Service
+  editor-service:
+    build:
+      context: ./services/editor-service
+      dockerfile: Dockerfile
+    container_name: editor-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./services/editor-service/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: mongodb
+      DB_PORT: 27017
+      MONGO_USER: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
+      MONGO_DB: editor_db
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/editor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🤖 AI Service
+  ai-service:
+    build:
+      context: ./services/AI_Model-Service
+      dockerfile: Dockerfile
+    container_name: ai-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    env_file:
+      - ./services/AI_Model-Service/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: mongodb
+      DB_PORT: 27017
+      MONGO_USER: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_PASSWORD: ${MONGO_ROOT_PASSWORD:-password123}
+      MONGO_DB: ai_db
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🆕 Repo Fixer Service (Port 3004)
+  repo-fixer-service:
+    build:
+      context: ./services/repo-fixer-service
+      dockerfile: Dockerfile
+    container_name: repo-fixer-service
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    env_file:
+      - ./services/repo-fixer-service/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: mongodb
+      DB_PORT: 27017
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-password123}@mongodb:27017/repo-fixer?authSource=admin
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672
+      AI_SERVICE_URL: http://ai-service:3003
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 🎨 Code Generation & Chat Service (Port 3005) - handles BOTH
+  code-gen-service:
+    build:
+      context: ./services/code-gen-service
+      dockerfile: Dockerfile
+    container_name: code-gen-service
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    env_file:
+      - ./services/code-gen-service/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: mongodb
+      DB_PORT: 27017
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-password123}@mongodb:27017/code-gen?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 🚀 Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      auth-service:
+        condition: service_started
+      editor-service:
+        condition: service_started
+      ai-service:
+        condition: service_started
+      repo-fixer-service:
+        condition: service_started
+      code-gen-service:
+        condition: service_started
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/api/auth/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mongodb_data:
+  rabbitmq_data:
+
+networks:
+  app-network:
+    driver: bridge

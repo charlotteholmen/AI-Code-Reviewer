@@ -1,0 +1,85 @@
+name: Deploy Frontend to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'AI_CODE_REVIEWER_FRONTED copy/app/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # Step 3: Install Dependencies
+      - name: Install Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_FRONTED\ copy/app
+
+      # Step 4: Run Linting
+      - name: Run ESLint
+        run: npm run lint 2>/dev/null || true
+        working-directory: AI_CODE_REVIEWER_FRONTED\ copy/app
+        continue-on-error: true
+
+      # Step 5: Build Frontend
+      - name: Build Frontend
+        run: npm run build
+        working-directory: AI_CODE_REVIEWER_FRONTED\ copy/app
+        env:
+          VITE_API_AUTH_URL: ${{ secrets.VITE_API_AUTH_URL }}
+          VITE_API_EDITOR_URL: ${{ secrets.VITE_API_EDITOR_URL }}
+          VITE_API_AI_URL: ${{ secrets.VITE_API_AI_URL }}
+          VITE_API_REPO_FIXER_URL: ${{ secrets.VITE_API_REPO_FIXER_URL }}
+          VITE_API_CODE_GEN_URL: ${{ secrets.VITE_API_CODE_GEN_URL }}
+          VITE_WS_EDITOR_URL: ${{ secrets.VITE_WS_EDITOR_URL }}
+          VITE_WS_AI_URL: ${{ secrets.VITE_WS_AI_URL }}
+          VITE_FRONTEND_URL: ${{ secrets.VITE_FRONTEND_URL }}
+          VITE_APP_NAME: "AI Code Reviewer"
+
+      # Step 6: Login to Azure
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Step 7: Package Frontend
+      - name: Package Frontend
+        run: |
+          cd "AI_CODE_REVIEWER_FRONTED copy/app"
+          zip -r ../../../frontend-dist.zip dist/
+        working-directory: ${{ github.workspace }}
+
+      # Step 8: Deploy Frontend to Azure
+      - name: Deploy Frontend to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer
+          package: frontend-dist.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_FRONTEND_PUBLISH_PROFILE }}
+
+      # Step 9: Deployment Summary
+      - name: Deployment Summary
+        run: |
+          echo "✅ Frontend Deployment Complete"
+          echo "=================================="
+          echo "Application: AI Code Reviewer"
+          echo "Environment: Production"
+          echo "Build: Vite (React 19)"
+          echo "Status: Successfully deployed to Azure"
+          echo ""
+          echo "🔗 Build artifacts uploaded to Azure App Service"
+          echo "📝 Check Azure Portal for deployment details"

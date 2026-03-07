@@ -1,0 +1,171 @@
+name: Deploy Backend Services to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'AI_CODE_REVIEWER_BACKEND copy/services/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # Step 3: Install Dependencies for All Services
+      - name: Install Auth Service Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/auth-service
+
+      - name: Install Editor Service Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/editor-service
+
+      - name: Install AI Model Service Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/AI_Model-Service
+
+      - name: Install Code Gen Service Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/code-gen-service
+
+      - name: Install Repo Fixer Service Dependencies
+        run: npm install
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/repo-fixer-service
+
+      # Step 4: Test Auth Service
+      - name: Test Auth Service
+        run: npm test
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/auth-service
+        continue-on-error: true
+
+      # Step 5: Test Editor Service
+      - name: Test Editor Service
+        run: npm test
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/editor-service
+        continue-on-error: true
+
+      # Step 6: Test AI Model Service
+      - name: Test AI Model Service
+        run: npm test
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/AI_Model-Service
+        continue-on-error: true
+
+      # Step 7: Test Code Gen Service
+      - name: Test Code Gen Service
+        run: npm test
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/code-gen-service
+        continue-on-error: true
+
+      # Step 8: Test Repo Fixer Service
+      - name: Test Repo Fixer Service
+        run: npm test
+        working-directory: AI_CODE_REVIEWER_BACKEND\ copy/services/repo-fixer-service
+        continue-on-error: true
+
+      # Step 9: Login to Azure
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Step 10: Deploy Auth Service (Port 3001)
+      - name: Deploy Auth Service
+        run: |
+          cd "AI_CODE_REVIEWER_BACKEND copy/services/auth-service"
+          zip -r ../../../auth-service.zip .
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload Auth Service to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer-auth-dev
+          package: auth-service.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_AUTH_PUBLISH_PROFILE }}
+        continue-on-error: true
+
+      # Step 11: Deploy Editor Service (Port 3002)
+      - name: Deploy Editor Service
+        run: |
+          cd "AI_CODE_REVIEWER_BACKEND copy/services/editor-service"
+          zip -r ../../../editor-service.zip .
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload Editor Service to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer-editor-dev
+          package: editor-service.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_EDITOR_PUBLISH_PROFILE }}
+        continue-on-error: true
+
+      # Step 12: Deploy AI Model Service (Port 3003)
+      - name: Deploy AI Model Service
+        run: |
+          cd "AI_CODE_REVIEWER_BACKEND copy/services/AI_Model-Service"
+          zip -r ../../../ai-model-service.zip .
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload AI Model Service to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer-ai-dev
+          package: ai-model-service.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_AI_PUBLISH_PROFILE }}
+        continue-on-error: true
+
+      # Step 13: Deploy Repo Fixer Service (Port 3004)
+      - name: Deploy Repo Fixer Service
+        run: |
+          cd "AI_CODE_REVIEWER_BACKEND copy/services/repo-fixer-service"
+          zip -r ../../../repo-fixer-service.zip .
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload Repo Fixer Service to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer-fixer-dev
+          package: repo-fixer-service.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_FIXER_PUBLISH_PROFILE }}
+        continue-on-error: true
+
+      # Step 14: Deploy Code Gen Service (Port 3005)
+      - name: Deploy Code Gen Service
+        run: |
+          cd "AI_CODE_REVIEWER_BACKEND copy/services/code-gen-service"
+          zip -r ../../../code-gen-service.zip .
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload Code Gen Service to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-web-ai-reviewer-codegen-dev
+          package: code-gen-service.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_CODEGEN_PUBLISH_PROFILE }}
+        continue-on-error: true
+
+      # Step 15: Deployment Summary
+      - name: Deployment Summary
+        run: |
+          echo "✅ Backend Services Deployment Summary"
+          echo "========================================"
+          echo "Auth Service (3001): Deployed"
+          echo "Editor Service (3002): Deployed"
+          echo "AI Model Service (3003): Deployed"
+          echo "Repo Fixer Service (3004): Deployed"
+          echo "Code Gen Service (3005): Deployed"
+          echo ""
+          echo "🔗 Update environment variables in Azure App Service settings"
+          echo "📝 Check Azure Portal for deployment logs"

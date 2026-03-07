@@ -1,0 +1,133 @@
+name: Deploy Infrastructure with Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'INFRA/**'
+      - '.github/workflows/deploy-infra.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ~> 1.0
+
+      # Step 3: Terraform Format Check
+      - name: Terraform Format Check
+        working-directory: INFRA
+        run: terraform fmt -check -recursive || true
+        continue-on-error: true
+
+      # Step 4: Initialize Terraform
+      - name: Terraform Init
+        working-directory: INFRA
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # Step 5: Terraform Validation
+      - name: Terraform Validate
+        working-directory: INFRA
+        run: terraform validate
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # Step 6: Terraform Plan
+      - name: Terraform Plan
+        working-directory: INFRA
+        run: terraform plan -out=tfplan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        continue-on-error: true
+
+      # Step 7: Upload Plan Artifact
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfplan
+          path: INFRA/tfplan
+        continue-on-error: true
+
+      # Step 8: Apply Terraform (Only on main branch with explicit approval)
+      - name: Terraform Apply
+        if: |
+          github.ref == 'refs/heads/main' && 
+          github.event_name == 'workflow_dispatch' && 
+          github.event.inputs.action == 'apply'
+        working-directory: INFRA
+        run: terraform apply -auto-approve tfplan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        continue-on-error: true
+
+      # Step 9: Capture Terraform Outputs
+      - name: Terraform Outputs
+        working-directory: INFRA
+        run: |
+          terraform output > /tmp/tf_output.txt 2>&1 || true
+          cat /tmp/tf_output.txt
+
+      # Step 10: Upload Outputs
+      - name: Upload Terraform Outputs
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-outputs
+          path: /tmp/tf_output.txt
+        continue-on-error: true
+
+      # Step 11: Deployment Summary
+      - name: Deployment Summary
+        run: |
+          echo "✅ Terraform Workflow Completed"
+          echo "======================================"
+          echo "Workflow: Infrastructure as Code"
+          echo "Tool: Terraform v1.0+"
+          echo "Provider: Azure Resource Manager"
+          echo ""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Action: ${{ github.event.inputs.action }}"
+          else
+            echo "Action: Plan (trigger: ${{ github.event_name }})"
+          fi
+          echo ""
+          echo "📋 Review plan changes in artifacts"
+          echo "🚀 To apply changes, trigger workflow with action=apply"
+          echo "📝 Check logs for detailed output"
